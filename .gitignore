@@ -1,0 +1,66 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.python-version
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Build and packaging
+build/
+dist/
+*.egg-info/
+
+# Benchmark outputs and generated data
+outputs/
+results/
+runs/
+reports/
+artifacts/
+tmp/
+temp/
+*.log
+
+# Large local datasets and model/cache files
+data/raw/
+data/cache/
+models/
+checkpoints/
+*.ckpt
+*.pt
+*.pth
+*.onnx
+
+# Node, if used for tooling or reports
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# OS and editor files
+.DS_Store
+Thumbs.db
+Desktop.ini
+.idea/
+.vscode/

@@ -1,0 +1,11 @@
+jupyterlab
+ipykernel
+numpy
+pandas
+pillow
+matplotlib
+seaborn
+tqdm
+python-dotenv
+requests
+scikit-learn
