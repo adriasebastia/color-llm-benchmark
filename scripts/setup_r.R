@@ -1,17 +1,22 @@
 options(repos = c(CRAN = "https://cloud.r-project.org"))
 
-packages <- readLines("requirements-r.txt")
-packages <- packages[packages != "" & !startsWith(packages, "#")]
+user_library <- Sys.getenv("R_LIBS_USER")
+if (!dir.exists(user_library)) {
+  dir.create(user_library, recursive = TRUE, showWarnings = FALSE)
+}
+.libPaths(c(user_library, .libPaths()))
 
-install.packages(packages)
-
-if (!requireNamespace("renv", quietly = TRUE)) {
-  install.packages("renv")
+project_root <- normalizePath(getwd(), winslash = "/", mustWork = TRUE)
+jupyter_bin <- file.path(project_root, ".venv", "Scripts")
+if (dir.exists(jupyter_bin)) {
+  Sys.setenv(PATH = paste(jupyter_bin, Sys.getenv("PATH"), sep = .Platform$path.sep))
 }
 
-renv::init(bare = TRUE)
-renv::install(packages)
-renv::snapshot(prompt = FALSE)
+packages <- readLines("requirements-r.txt")
+packages <- packages[packages != "" & !startsWith(packages, "#")]
+packages <- setdiff(packages, "renv")
+
+install.packages(packages)
 
 IRkernel::installspec(
   name = "color-llm-benchmark-r",
