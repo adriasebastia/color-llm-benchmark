@@ -35,20 +35,20 @@ winget install --id RProject.R -e
 Despues instala los paquetes de R del proyecto:
 
 ```r
-install.packages(readLines("requirements-r.txt"), repos = "https://cloud.r-project.org")
+install.packages(
+  c("tidyverse", "magick", "jsonlite", "httr2", "dotenv", "IRkernel"),
+  repos = "https://cloud.r-project.org"
+)
 ```
 
 Para usar R desde Jupyter hace falta instalar IRKernel:
 
 ```r
 install.packages("IRkernel")
-IRkernel::installspec()
-```
-
-En este repo tambien hay un script que instala las dependencias y registra el kernel con el nombre del proyecto:
-
-```powershell
-Rscript scripts/setup_r.R
+IRkernel::installspec(
+  name = "color-llm-benchmark-r",
+  displayname = "R (color-llm-benchmark)"
+)
 ```
 
 Si `Rscript` no se reconoce, cierra y abre PowerShell o revisa que `C:\Program Files\R\R-4.5.3\bin` este en el `PATH`.

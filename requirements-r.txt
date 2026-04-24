@@ -1,9 +1,0 @@
-# R packages for the R notebook environment.
-# Install from R with:
-#   install.packages(readLines("requirements-r.txt"), repos = "https://cloud.r-project.org")
-IRkernel
-tidyverse
-magick
-jsonlite
-httr2
-dotenv
