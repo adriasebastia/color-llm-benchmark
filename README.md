@@ -2,7 +2,7 @@
 
 UPC PE: benchmark para evaluar si distintos LLMs identifican bien el color principal de una imagen.
 
-La idea del proyecto es separar la recogida de datos y el analisis. Los notebooks explican y ejecutan los pasos principales, pero la logica reutilizable esta en scripts de R.
+La idea del proyecto es separar la recogida de datos y el analisis. La recogida se hace en Python, porque genera colores, imagenes y llamadas a API. El analisis se hace en R. Los notebooks explican y ejecutan los pasos principales, pero la logica reutilizable esta en scripts.
 
 ## Estructura del proyecto
 
@@ -73,7 +73,8 @@ JupyterLab se ejecuta desde un entorno virtual local llamado `.venv`.
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install --upgrade pip
-.\.venv\Scripts\python.exe -m pip install jupyterlab ipykernel
+.\.venv\Scripts\python.exe -m pip install jupyterlab ipykernel numpy pandas pillow scikit-image openai
+.\.venv\Scripts\python.exe -m ipykernel install --user --name color-llm-benchmark-py --display-name "Python (color-llm-benchmark)"
 ```
 
 Esto crea la carpeta `.venv/`, que no se sube a Git porque es solo del ordenador local.
@@ -123,10 +124,11 @@ recollida-dades/dades.ipynb
 analisis/analisis.ipynb
 ```
 
-Selecciona el kernel:
+Selecciona el kernel correcto en cada uno:
 
 ```text
-R (color-llm-benchmark)
+recollida-dades/dades.ipynb -> Python (color-llm-benchmark)
+analisis/analisis.ipynb -> R (color-llm-benchmark)
 ```
 
 ## Ejecucion del proyecto
@@ -137,7 +139,15 @@ R (color-llm-benchmark)
 recollida-dades/dades.ipynb
 ```
 
-Este notebook prepara carpetas, carga funciones desde `recollida-dades/scripts/`, genera el CSV base y escribe logs.
+Este notebook prepara carpetas, carga funciones Python desde `recollida-dades/scripts/`, genera el CSV base y escribe logs.
+Concretamente genera:
+
+```text
+recollida-dades/csv/input_image_sample.csv
+recollida-dades/images/*.png
+```
+
+El CSV contiene los 1000 colores aleatorios, los canales `r`, `g`, `b`, el hexadecimal y el chroma. Las imagenes son PNG de 100x100 pixels con un 60% del color objetivo, 20% de un color cercano y 20% de un color aleatorio.
 
 2. Ejecutar despues:
 
