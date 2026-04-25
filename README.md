@@ -73,11 +73,28 @@ JupyterLab se ejecuta desde un entorno virtual local llamado `.venv`.
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install --upgrade pip
-.\.venv\Scripts\python.exe -m pip install jupyterlab ipykernel numpy pandas pillow scikit-image openai
+.\.venv\Scripts\python.exe -m pip install jupyterlab ipykernel numpy pandas pillow scikit-image openai python-dotenv
 .\.venv\Scripts\python.exe -m ipykernel install --user --name color-llm-benchmark-py --display-name "Python (color-llm-benchmark)"
 ```
 
 Esto crea la carpeta `.venv/`, que no se sube a Git porque es solo del ordenador local.
+
+### 3.1. Configurar la API key
+
+Para ejecutar la parte de modelos, crea un fichero `.env` en la raiz del proyecto. No lo subas nunca a Git.
+
+```powershell
+Copy-Item .env.example .env
+notepad .env
+```
+
+Dentro de `.env`, deja la variable asi, pero usando tu clave real:
+
+```text
+OPENAI_API_KEY=tu_clave_aqui
+```
+
+En el notebook `recollida-dades/dades.ipynb`, las llamadas a modelos estan apagadas por defecto con `RUN_MODEL_QUERIES = False`. Cambialo a `True` solo cuando quieras gastar llamadas de API.
 
 ### 4. Instalar paquetes de R
 

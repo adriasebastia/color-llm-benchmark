@@ -466,32 +466,85 @@ def collect_model_outputs(
     image_paths: list[Path],
     models: list[str],
     temperature: float = 0.2,
+    output_path: str | Path | None = None,
+    log_file: str | Path | None = None,
+    max_images: int | None = None,
 ) -> pd.DataFrame:
+    """Consulta models de visio i desa resultats de forma incremental."""
     rows: list[dict] = []
+    output_file = Path(output_path) if output_path else None
+    existing = pd.DataFrame()
+    done_pairs: set[tuple[str, str]] = set()
 
-    for image_path in sorted(image_paths):
+    if output_file and output_file.exists():
+        existing = pd.read_csv(output_file)
+        if {"image_name", "model"}.issubset(existing.columns):
+            done_pairs = set(zip(existing["image_name"], existing["model"]))
+
+    selected_paths = sorted(image_paths)
+    if max_images is not None:
+        selected_paths = selected_paths[:max_images]
+
+    total_tasks = len(selected_paths) * len(models)
+    task_index = 0
+
+    for image_path in selected_paths:
         for model in models:
-            started = time.time()
-            raw_response = query_model_for_color(
-                client,
-                image_path=image_path,
-                model=model,
-                temperature=temperature,
-            )
-            elapsed_seconds = time.time() - started
-            rows.append(
-                {
-                    "image_name": image_path.name,
-                    "model": model,
-                    "temperature": temperature,
-                    "response_raw": raw_response,
-                    "response_hex": normalise_hex_response(raw_response),
-                    "elapsed_seconds": elapsed_seconds,
-                    "executed_at": datetime.now().isoformat(timespec="seconds"),
-                }
-            )
+            task_index += 1
+            if (image_path.name, model) in done_pairs:
+                if log_file:
+                    write_log(f"Model skip [{task_index}/{total_tasks}] {model} {image_path.name}", log_file)
+                continue
 
-    return pd.DataFrame(rows)
+            started = time.time()
+            if log_file:
+                write_log(f"Model start [{task_index}/{total_tasks}] {model} {image_path.name}", log_file)
+
+            raw_response = ""
+            response_hex = None
+            status = "ok"
+            error_message = ""
+            try:
+                raw_response = query_model_for_color(
+                    client,
+                    image_path=image_path,
+                    model=model,
+                    temperature=temperature,
+                )
+                response_hex = normalise_hex_response(raw_response)
+                if response_hex is None:
+                    status = "invalid_hex"
+                    error_message = f"Resposta sense hexadecimal valid: {raw_response}"
+            except Exception as error:  # noqa: BLE001
+                status = "error"
+                error_message = str(error)
+
+            elapsed_seconds = time.time() - started
+            row = {
+                "image_name": image_path.name,
+                "model": model,
+                "temperature": temperature,
+                "status": status,
+                "response_raw": raw_response,
+                "response_hex": response_hex,
+                "error_message": error_message,
+                "elapsed_seconds": elapsed_seconds,
+                "executed_at": datetime.now().isoformat(timespec="seconds"),
+            }
+            rows.append(row)
+
+            if output_file:
+                output_file.parent.mkdir(parents=True, exist_ok=True)
+                pd.concat([existing, pd.DataFrame(rows)], ignore_index=True).to_csv(output_file, index=False)
+
+            if log_file:
+                write_log(
+                    f"Model done [{task_index}/{total_tasks}] {model} {image_path.name} "
+                    f"status={status} hex={response_hex} seconds={elapsed_seconds:.2f}",
+                    log_file,
+                )
+
+    return pd.concat([existing, pd.DataFrame(rows)], ignore_index=True)
 
 
 def rgb_distance(hex_a: str, hex_b: str) -> float:
