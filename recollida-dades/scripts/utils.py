@@ -154,13 +154,13 @@ def save_color_image(image_array: np.ndarray, path: str | Path) -> Path:
     return output_path
 
 
-def save_rgb_sample_map(
+def save_rgb_sample_grid(
     sample: pd.DataFrame,
     path: str | Path,
     columns: int = 40,
     swatch_size: int = 18,
 ) -> Path:
-    """Guarda un mapa visual amb tots els colors RGB de la mostra."""
+    """Guarda una graella amb tots els colors RGB exactes de la mostra."""
     required_columns = {"r", "g", "b"}
     missing_columns = required_columns - set(sample.columns)
     if missing_columns:
@@ -185,6 +185,60 @@ def save_rgb_sample_map(
         y = (index // columns) * swatch_size
         swatch = Image.new("RGB", (swatch_size, swatch_size), rgb)
         canvas.paste(swatch, (x, y))
+
+    canvas.save(output_path, format="PNG")
+    return output_path
+
+
+def save_rgb_sample_map(
+    sample: pd.DataFrame,
+    path: str | Path,
+    width: int = 900,
+    height: int = 520,
+    saturation: float = 1.0,
+    point_radius: int = 3,
+) -> Path:
+    """Guarda un mapa HSV continu amb les mostres RGB pintades com a punts."""
+    required_columns = {"r", "g", "b"}
+    missing_columns = required_columns - set(sample.columns)
+    if missing_columns:
+        raise ValueError(f"Falten columnes per generar el mapa: {sorted(missing_columns)}")
+
+    output_path = Path(path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    background = np.zeros((height, width, 3), dtype=np.uint8)
+    for y in range(height):
+        value = 1 - (y / max(1, height - 1))
+        for x in range(width):
+            hue = x / max(1, width - 1)
+            rgb_float = colorsys.hsv_to_rgb(hue, saturation, value)
+            background[y, x] = tuple(int(channel * 255) for channel in rgb_float)
+
+    canvas = Image.fromarray(background, mode="RGB")
+    pixels = canvas.load()
+
+    for row in sample.itertuples(index=False):
+        rgb = (int(row.r), int(row.g), int(row.b))
+        hue, _, value = colorsys.rgb_to_hsv(rgb[0] / 255, rgb[1] / 255, rgb[2] / 255)
+        cx = int(round(hue * (width - 1)))
+        cy = int(round((1 - value) * (height - 1)))
+
+        luminance = 0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2]
+        outline = (0, 0, 0) if luminance > 150 else (255, 255, 255)
+
+        for dy in range(-point_radius - 1, point_radius + 2):
+            for dx in range(-point_radius - 1, point_radius + 2):
+                x = cx + dx
+                y = cy + dy
+                if not (0 <= x < width and 0 <= y < height):
+                    continue
+
+                distance = (dx**2 + dy**2) ** 0.5
+                if distance <= point_radius:
+                    pixels[x, y] = rgb
+                elif distance <= point_radius + 1:
+                    pixels[x, y] = outline
 
     canvas.save(output_path, format="PNG")
     return output_path
