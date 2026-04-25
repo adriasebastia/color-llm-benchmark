@@ -11,6 +11,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 from PIL import Image
+from PIL import ImageDraw
 from skimage import color
 
 
@@ -193,12 +194,11 @@ def save_rgb_sample_grid(
 def save_rgb_sample_map(
     sample: pd.DataFrame,
     path: str | Path,
-    width: int = 900,
-    height: int = 520,
-    saturation: float = 1.0,
-    point_radius: int = 3,
+    panel_size: int = 300,
+    margin: int = 44,
+    point_radius: int = 2,
 ) -> Path:
-    """Guarda un mapa HSV continu amb les mostres RGB pintades com a punts."""
+    """Guarda diagnostics visuals per veure si la mostra RGB esta ben repartida."""
     required_columns = {"r", "g", "b"}
     missing_columns = required_columns - set(sample.columns)
     if missing_columns:
@@ -207,39 +207,124 @@ def save_rgb_sample_map(
     output_path = Path(path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    background = np.zeros((height, width, 3), dtype=np.uint8)
-    for y in range(height):
-        value = 1 - (y / max(1, height - 1))
-        for x in range(width):
-            hue = x / max(1, width - 1)
-            rgb_float = colorsys.hsv_to_rgb(hue, saturation, value)
-            background[y, x] = tuple(int(channel * 255) for channel in rgb_float)
+    panel_width = panel_size + (2 * margin)
+    panel_height = panel_size + (2 * margin)
+    title_height = 34
+    gutter = 22
+    canvas_width = (2 * panel_width) + gutter
+    canvas_height = title_height + (3 * panel_height) + (2 * gutter)
+    canvas = Image.new("RGB", (canvas_width, canvas_height), "white")
+    draw = ImageDraw.Draw(canvas)
 
-    canvas = Image.fromarray(background, mode="RGB")
-    pixels = canvas.load()
+    rows = list(sample[["r", "g", "b"]].itertuples(index=False, name=None))
 
-    for row in sample.itertuples(index=False):
-        rgb = (int(row.r), int(row.g), int(row.b))
-        hue, _, value = colorsys.rgb_to_hsv(rgb[0] / 255, rgb[1] / 255, rgb[2] / 255)
-        cx = int(round(hue * (width - 1)))
-        cy = int(round((1 - value) * (height - 1)))
+    def point_color(rgb: tuple[int, int, int]) -> tuple[int, int, int]:
+        return tuple(int(v) for v in rgb)
 
-        luminance = 0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2]
-        outline = (0, 0, 0) if luminance > 150 else (255, 255, 255)
+    def panel_origin(col: int, row: int) -> tuple[int, int]:
+        return col * (panel_width + gutter), title_height + row * (panel_height + gutter)
 
-        for dy in range(-point_radius - 1, point_radius + 2):
-            for dx in range(-point_radius - 1, point_radius + 2):
-                x = cx + dx
-                y = cy + dy
-                if not (0 <= x < width and 0 <= y < height):
-                    continue
+    def draw_axes(origin: tuple[int, int], title: str, x_label: str, y_label: str) -> tuple[int, int]:
+        ox, oy = origin
+        left = ox + margin
+        top = oy + margin
+        right = left + panel_size
+        bottom = top + panel_size
+        draw.rectangle([left, top, right, bottom], outline=(25, 25, 25), width=1)
+        draw.text((left, oy + 8), title, fill=(0, 0, 0))
+        draw.text((left + 60, top - 18), y_label, fill=(0, 0, 0))
+        draw.text((left + 60, bottom + 12), x_label, fill=(0, 0, 0))
+        draw.text((left - 8, bottom + 2), "0", fill=(90, 90, 90))
+        draw.text((right - 22, bottom + 2), "255", fill=(90, 90, 90))
+        draw.text((left - 30, top - 6), "255", fill=(90, 90, 90))
+        return left, top
 
-                distance = (dx**2 + dy**2) ** 0.5
-                if distance <= point_radius:
-                    pixels[x, y] = rgb
-                elif distance <= point_radius + 1:
-                    pixels[x, y] = outline
+    def draw_scatter(origin: tuple[int, int], title: str, x_label: str, y_label: str, x_index: int, y_index: int) -> None:
+        left, top = draw_axes(origin, title, x_label, y_label)
+        for rgb in rows:
+            x = left + round((rgb[x_index] / 255) * panel_size)
+            y = top + panel_size - round((rgb[y_index] / 255) * panel_size)
+            color_rgb = point_color(rgb)
+            draw.ellipse(
+                [x - point_radius, y - point_radius, x + point_radius, y + point_radius],
+                fill=color_rgb,
+            )
 
+    def draw_scatter_values(
+        origin: tuple[int, int],
+        title: str,
+        x_label: str,
+        y_label: str,
+        points: list[tuple[int, int, tuple[int, int, int]]],
+    ) -> None:
+        left, top = draw_axes(origin, title, x_label, y_label)
+        for x_value, y_value, rgb in points:
+            x = left + round((x_value / 255) * panel_size)
+            y = top + panel_size - round((y_value / 255) * panel_size)
+            draw.ellipse(
+                [x - point_radius, y - point_radius, x + point_radius, y + point_radius],
+                fill=point_color(rgb),
+            )
+
+    def draw_histogram(origin: tuple[int, int]) -> None:
+        left, top = draw_axes(origin, "Distribucio per canal", "valor RGB", "freq.")
+        bins = np.linspace(0, 256, 17)
+        max_count = 1
+        histograms = []
+        for channel in ["r", "g", "b"]:
+            counts, _ = np.histogram(sample[channel], bins=bins)
+            histograms.append((channel, counts))
+            max_count = max(max_count, int(counts.max()))
+
+        bar_width = panel_size / 16
+        channel_colors = {"r": (220, 40, 40), "g": (40, 170, 70), "b": (50, 90, 220)}
+        offsets = {"r": -bar_width / 4, "g": 0, "b": bar_width / 4}
+        for channel, counts in histograms:
+            for i, count in enumerate(counts):
+                x_center = left + (i + 0.5) * bar_width + offsets[channel]
+                bar_h = (count / max_count) * panel_size
+                draw.rectangle(
+                    [
+                        x_center - (bar_width / 8),
+                        top + panel_size - bar_h,
+                        x_center + (bar_width / 8),
+                        top + panel_size,
+                    ],
+                    fill=channel_colors[channel],
+                )
+
+    def draw_hue_saturation(origin: tuple[int, int]) -> None:
+        left, top = draw_axes(origin, "Hue vs saturation", "hue", "saturation")
+        for y in range(panel_size):
+            saturation = 1 - (y / max(1, panel_size - 1))
+            for x in range(panel_size):
+                hue = x / max(1, panel_size - 1)
+                rgb_float = colorsys.hsv_to_rgb(hue, saturation, 1)
+                canvas.putpixel((left + x, top + y), tuple(int(v * 255) for v in rgb_float))
+        draw.rectangle([left, top, left + panel_size, top + panel_size], outline=(25, 25, 25), width=1)
+        draw.rectangle([left - 38, top - 24, left + 34, top + 4], fill="white")
+        draw.rectangle([left + panel_size - 28, top + panel_size + 2, left + panel_size + 34, top + panel_size + 18], fill="white")
+        draw.text((left - 8, top + panel_size + 2), "0", fill=(90, 90, 90))
+        draw.text((left + panel_size - 8, top + panel_size + 2), "1", fill=(90, 90, 90))
+        draw.text((left - 18, top - 6), "1", fill=(90, 90, 90))
+
+        for rgb in rows:
+            hue, saturation, _ = colorsys.rgb_to_hsv(rgb[0] / 255, rgb[1] / 255, rgb[2] / 255)
+            x = left + round(hue * panel_size)
+            y = top + panel_size - round(saturation * panel_size)
+            draw.ellipse(
+                [x - point_radius, y - point_radius, x + point_radius, y + point_radius],
+                fill=point_color(rgb),
+            )
+
+    draw.text((margin, 8), "Diagnosi visual de distribucio de les 1000 mostres RGB", fill=(0, 0, 0))
+    draw_histogram(panel_origin(0, 0))
+    draw_hue_saturation(panel_origin(1, 0))
+    draw_scatter(panel_origin(0, 1), "R vs G", "R", "G", 0, 1)
+    draw_scatter(panel_origin(1, 1), "R vs B", "R", "B", 0, 2)
+    draw_scatter(panel_origin(0, 2), "G vs B", "G", "B", 1, 2)
+    value_points = [(max(rgb), min(rgb), rgb) for rgb in rows]
+    draw_scatter_values(panel_origin(1, 2), "max RGB vs min RGB", "max", "min", value_points)
     canvas.save(output_path, format="PNG")
     return output_path
 

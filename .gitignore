@@ -49,6 +49,9 @@ temp/
 !/recollida-dades/images/.gitkeep
 /recollida-dades/logs/*.log
 !/recollida-dades/logs/.gitkeep
+!/recollida-dades/tmp/
+/recollida-dades/tmp/*
+!/recollida-dades/tmp/.gitkeep
 
 # Large local datasets and model/cache files
 data/raw/
