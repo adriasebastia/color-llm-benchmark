@@ -33,6 +33,56 @@ def write_log(message: str, log_file: str | Path = Path("logs") / "pipeline.log"
     return line
 
 
+def format_duration(seconds: float) -> str:
+    """Formata segons com a text curt per logs i sortides del notebook."""
+    seconds = max(0, float(seconds))
+    if seconds < 60:
+        return f"{seconds:.1f}s"
+
+    minutes, remaining_seconds = divmod(seconds, 60)
+    if minutes < 60:
+        return f"{int(minutes)}m {remaining_seconds:04.1f}s"
+
+    hours, remaining_minutes = divmod(minutes, 60)
+    return f"{int(hours)}h {int(remaining_minutes)}m {remaining_seconds:04.1f}s"
+
+
+class ProgressBar:
+    """Barra de progres simple per notebooks, amb ETA i temps transcorregut."""
+
+    def __init__(self, total: int, label: str, width: int = 28) -> None:
+        self.total = max(1, int(total))
+        self.label = label
+        self.width = width
+        self.started = time.time()
+        self.current = 0
+
+    def update(self, current: int | None = None, extra: str = "") -> None:
+        if current is None:
+            self.current += 1
+        else:
+            self.current = current
+
+        elapsed = time.time() - self.started
+        rate = self.current / elapsed if elapsed > 0 else 0
+        remaining = (self.total - self.current) / rate if rate > 0 else 0
+        ratio = min(1, self.current / self.total)
+        done = int(self.width * ratio)
+        bar = "#" * done + "-" * (self.width - done)
+        suffix = f" | {extra}" if extra else ""
+
+        print(
+            f"\r{self.label} [{bar}] {self.current}/{self.total} "
+            f"({ratio * 100:5.1f}%) elapsed={format_duration(elapsed)} eta={format_duration(remaining)}{suffix}",
+            end="",
+            flush=True,
+        )
+
+    def finish(self, extra: str = "") -> None:
+        self.update(self.total, extra=extra)
+        print()
+
+
 def delete_sample_outputs(
     csv_dir: str | Path,
     images_dir: str | Path,
@@ -100,10 +150,17 @@ def hex_to_chroma(hex_color: str) -> float:
     return float((a**2 + b_val**2) ** 0.5)
 
 
-def generate_unique_colors(n: int = 1000, seed: int = 23) -> pd.DataFrame:
+def generate_unique_colors(
+    n: int = 1000,
+    seed: int = 23,
+    progress: bool = False,
+    log_file: str | Path | None = None,
+) -> pd.DataFrame:
     random.seed(seed)
     colors: list[dict] = []
     generated: set[str] = set()
+    progress_bar = ProgressBar(n, "Mostra RGB") if progress else None
+    started = time.time()
 
     while len(generated) < n:
         r = random.randint(0, 255)
@@ -125,6 +182,15 @@ def generate_unique_colors(n: int = 1000, seed: int = 23) -> pd.DataFrame:
                 "chroma": hex_to_chroma(hex_color),
             }
         )
+
+        if progress_bar:
+            progress_bar.update(len(generated), extra=hex_color)
+
+    if progress_bar:
+        progress_bar.finish(extra="fet")
+
+    if log_file:
+        write_log(f"Mostra RGB generada: files={len(colors)} temps={format_duration(time.time() - started)}", log_file)
 
     return pd.DataFrame(colors)
 
@@ -411,16 +477,30 @@ def generate_images_from_sample(
     size: int = 100,
     near_distance: int = 30,
     seed: int = 23,
+    progress: bool = False,
+    log_file: str | Path | None = None,
 ) -> list[Path]:
     random.seed(seed)
     image_dir = Path(output_dir)
     image_dir.mkdir(parents=True, exist_ok=True)
 
     paths: list[Path] = []
-    for row in sample.itertuples(index=False):
+    progress_bar = ProgressBar(len(sample), "Imatges PNG") if progress else None
+    started = time.time()
+
+    for index, row in enumerate(sample.itertuples(index=False), start=1):
         target_rgb = (int(row.r), int(row.g), int(row.b))
         image_array = generate_image_array(target_rgb, size=size, near_distance=near_distance)
         paths.append(save_color_image(image_array, image_dir / row.image_name))
+
+        if progress_bar:
+            progress_bar.update(index, extra=row.image_name)
+
+    if progress_bar:
+        progress_bar.finish(extra="fet")
+
+    if log_file:
+        write_log(f"Imatges generades: files={len(paths)} temps={format_duration(time.time() - started)}", log_file)
 
     return paths
 
@@ -440,6 +520,14 @@ def encode_image_base64(path: str | Path) -> str:
 def normalise_hex_response(value: str) -> str | None:
     match = re.search(r"#?([0-9A-Fa-f]{6})", value or "")
     return match.group(1).upper() if match else None
+
+
+def compact_error_message(value: str, max_length: int = 180) -> str:
+    """Redueix errors llargs a una sola linia perque el log sigui llegible."""
+    message = " ".join(str(value or "").split())
+    if len(message) <= max_length:
+        return message
+    return f"{message[: max_length - 3]}..."
 
 
 def query_model_for_color(client, image_path: str | Path, model: str, temperature: float = 0.2) -> str:
@@ -487,6 +575,8 @@ def collect_model_outputs(
 
     total_tasks = len(selected_paths) * len(models)
     task_index = 0
+    progress_bar = ProgressBar(total_tasks, "Models API")
+    full_started = time.time()
 
     for image_path in selected_paths:
         for model in models:
@@ -494,6 +584,7 @@ def collect_model_outputs(
             if (image_path.name, model) in done_pairs:
                 if log_file:
                     write_log(f"Model skip [{task_index}/{total_tasks}] {model} {image_path.name}", log_file)
+                progress_bar.update(task_index, extra=f"skip {model} {image_path.name}")
                 continue
 
             started = time.time()
@@ -538,11 +629,17 @@ def collect_model_outputs(
                 pd.concat([existing, pd.DataFrame(rows)], ignore_index=True).to_csv(output_file, index=False)
 
             if log_file:
+                error_for_log = compact_error_message(error_message)
+                detail = f" error={error_for_log}" if error_for_log else ""
                 write_log(
                     f"Model done [{task_index}/{total_tasks}] {model} {image_path.name} "
-                    f"status={status} hex={response_hex} seconds={elapsed_seconds:.2f}",
+                    f"status={status} hex={response_hex} seconds={elapsed_seconds:.2f}{detail}",
                     log_file,
                 )
+
+            progress_bar.update(task_index, extra=f"{status} {model} {image_path.name}")
+
+    progress_bar.finish(extra=f"temps total {format_duration(time.time() - full_started)}")
 
     return pd.concat([existing, pd.DataFrame(rows)], ignore_index=True)
 
