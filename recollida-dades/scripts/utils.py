@@ -471,6 +471,101 @@ def save_chroma_distribution(
     return output_path
 
 
+def save_error_distribution(
+    final_sample: pd.DataFrame,
+    path: str | Path,
+    width: int = 820,
+    height: int = 460,
+    bins_count: int = 24,
+) -> Path:
+    """Guarda un histograma de l'error cromatic RGB separat per model."""
+    required_columns = {"model", "status", "error_cromatic"}
+    missing_columns = required_columns - set(final_sample.columns)
+    if missing_columns:
+        raise ValueError(f"Falten columnes per generar el grafic: {sorted(missing_columns)}")
+
+    output_path = Path(path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    valid = final_sample[
+        (final_sample["status"] == "ok") & final_sample["error_cromatic"].notna()
+    ].copy()
+
+    canvas = Image.new("RGB", (width, height), "white")
+    draw = ImageDraw.Draw(canvas)
+
+    margin_left = 72
+    margin_right = 32
+    margin_top = 82
+    margin_bottom = 78
+    plot_width = width - margin_left - margin_right
+    plot_height = height - margin_top - margin_bottom
+    left = margin_left
+    top = margin_top
+    right = left + plot_width
+    bottom = top + plot_height
+
+    draw.text((left, 20), "Distribucio de l'error cromatic per model", fill=(0, 0, 0))
+    draw.text(
+        (left, 42),
+        "Error cromatic = distancia euclidiana RGB entre color real i resposta",
+        fill=(70, 70, 70),
+    )
+    draw.rectangle([left, top, right, bottom], outline=(25, 25, 25), width=1)
+
+    if valid.empty:
+        draw.text((left + 24, top + 32), "Encara no hi ha prediccions valides per dibuixar.", fill=(120, 0, 0))
+        canvas.save(output_path, format="PNG")
+        return output_path
+
+    max_error = max(1.0, float(np.ceil(valid["error_cromatic"].max() / 10) * 10))
+    edges = np.linspace(0, max_error, bins_count + 1)
+    models = sorted(valid["model"].dropna().unique())
+    palette = [
+        (45, 105, 190),
+        (220, 90, 45),
+        (70, 160, 95),
+        (155, 90, 185),
+    ]
+
+    histograms = []
+    max_count = 1
+    for model in models:
+        counts, _ = np.histogram(valid.loc[valid["model"] == model, "error_cromatic"], bins=edges)
+        histograms.append((model, counts))
+        max_count = max(max_count, int(counts.max()))
+
+    group_width = plot_width / bins_count
+    bar_gap = 2
+    bar_width = max(2, (group_width - (len(models) + 1) * bar_gap) / max(1, len(models)))
+
+    for model_index, (model, counts) in enumerate(histograms):
+        fill = palette[model_index % len(palette)]
+        for bin_index, count in enumerate(counts):
+            x0 = left + bin_index * group_width + bar_gap + model_index * (bar_width + bar_gap)
+            x1 = x0 + bar_width
+            bar_height = (count / max_count) * plot_height
+            y0 = bottom - bar_height
+            draw.rectangle([x0, y0, x1, bottom], fill=fill)
+
+    draw.text((left - 8, bottom + 8), "0", fill=(90, 90, 90))
+    draw.text((right - 44, bottom + 8), f"{max_error:.0f}", fill=(90, 90, 90))
+    draw.text((left + (plot_width // 2) - 60, bottom + 32), "error cromatic", fill=(0, 0, 0))
+    draw.text((left - 54, top - 8), str(max_count), fill=(90, 90, 90))
+    draw.text((left - 50, top + 18), "freq.", fill=(0, 0, 0))
+
+    legend_x = left
+    legend_y = height - 28
+    for model_index, model in enumerate(models):
+        fill = palette[model_index % len(palette)]
+        x = legend_x + model_index * 150
+        draw.rectangle([x, legend_y, x + 14, legend_y + 14], fill=fill)
+        draw.text((x + 20, legend_y - 1), str(model), fill=(0, 0, 0))
+
+    canvas.save(output_path, format="PNG")
+    return output_path
+
+
 def generate_images_from_sample(
     sample: pd.DataFrame,
     output_dir: str | Path,
@@ -656,12 +751,68 @@ def rgb_distance(hex_a: str, hex_b: str) -> float:
     return float(np.linalg.norm(rgb_a - rgb_b))
 
 
-def build_final_sample(input_sample: pd.DataFrame, model_outputs: pd.DataFrame) -> pd.DataFrame:
-    final = model_outputs.merge(input_sample, on="image_name", how="left")
-    final["error_cromatic"] = final.apply(
-        lambda row: rgb_distance(row["hex"], row["response_hex"])
-        if pd.notna(row["hex"]) and pd.notna(row["response_hex"])
-        else np.nan,
+def build_final_sample(
+    input_sample: pd.DataFrame,
+    model_outputs: pd.DataFrame,
+    images_dir: str | Path | None = None,
+) -> pd.DataFrame:
+    final = input_sample.merge(model_outputs, on="image_name", how="left")
+
+    if images_dir is not None:
+        image_dir = Path(images_dir)
+        final["image_kb"] = final["image_name"].apply(
+            lambda name: round((image_dir / str(name)).stat().st_size / 1024, 2)
+            if (image_dir / str(name)).exists()
+            else np.nan
+        )
+    else:
+        final["image_kb"] = np.nan
+
+    final["response_hex"] = final["response_hex"].apply(
+        lambda value: normalise_hex_response(str(value)) if pd.notna(value) else np.nan
+    )
+
+    valid_response = (final["status"] == "ok") & final["response_hex"].notna()
+    final["response_r"] = np.nan
+    final["response_g"] = np.nan
+    final["response_b"] = np.nan
+
+    for index, response_hex in final.loc[valid_response, "response_hex"].items():
+        r, g, b = hex_to_rgb(response_hex)
+        final.loc[index, ["response_r", "response_g", "response_b"]] = [r, g, b]
+
+    for column in ["response_r", "response_g", "response_b"]:
+        final[column] = final[column].astype("Int64")
+
+    final["error_cromatic"] = np.nan
+    final.loc[valid_response, "error_cromatic"] = final.loc[valid_response].apply(
+        lambda row: rgb_distance(row["hex"], row["response_hex"]),
         axis=1,
     )
-    return final
+
+    ordered_columns = [
+        "image_name",
+        "image_kb",
+        "hex",
+        "r",
+        "g",
+        "b",
+        "chroma",
+        "model",
+        "temperature",
+        "status",
+        "response_raw",
+        "response_hex",
+        "response_r",
+        "response_g",
+        "response_b",
+        "error_cromatic",
+        "elapsed_seconds",
+        "executed_at",
+        "error_message",
+    ]
+    for column in ordered_columns:
+        if column not in final.columns:
+            final[column] = np.nan
+
+    return final[ordered_columns]
