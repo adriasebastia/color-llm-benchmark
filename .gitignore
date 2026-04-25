@@ -43,19 +43,11 @@ temp/
 *.log
 
 # Generated benchmark samples
-/recollida-dades/csv/*.csv
-!/recollida-dades/csv/.gitkeep
-/recollida-dades/images/*.png
-!/recollida-dades/images/.gitkeep
 /recollida-dades/logs/*.log
 !/recollida-dades/logs/.gitkeep
 !/recollida-dades/tmp/
 /recollida-dades/tmp/*
 !/recollida-dades/tmp/.gitkeep
-/recollida-dades/sense-soroll/csv/*.csv
-!/recollida-dades/sense-soroll/csv/.gitkeep
-/recollida-dades/sense-soroll/images/*.png
-!/recollida-dades/sense-soroll/images/.gitkeep
 /recollida-dades/sense-soroll/logs/*.log
 !/recollida-dades/sense-soroll/logs/.gitkeep
 !/recollida-dades/sense-soroll/tmp/
