@@ -535,7 +535,7 @@ def query_model_for_color(client, image_path: str | Path, model: str, temperatur
     response = client.responses.create(
         model=model,
         temperature=temperature,
-        max_output_tokens=10,
+        max_output_tokens=16,
         input=[
             {
                 "role": "user",
@@ -557,6 +557,7 @@ def collect_model_outputs(
     output_path: str | Path | None = None,
     log_file: str | Path | None = None,
     max_images: int | None = None,
+    retry_failed: bool = True,
 ) -> pd.DataFrame:
     """Consulta models de visio i desa resultats de forma incremental."""
     rows: list[dict] = []
@@ -566,6 +567,11 @@ def collect_model_outputs(
 
     if output_file and output_file.exists():
         existing = pd.read_csv(output_file)
+        if retry_failed and "status" in existing.columns:
+            retry_count = int((existing["status"] != "ok").sum())
+            if retry_count and log_file:
+                write_log(f"Models pendents de reintentar: {retry_count} files amb status != ok", log_file)
+            existing = existing[existing["status"] == "ok"].copy()
         if {"image_name", "model"}.issubset(existing.columns):
             done_pairs = set(zip(existing["image_name"], existing["model"]))
 
