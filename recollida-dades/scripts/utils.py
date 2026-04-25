@@ -329,6 +329,67 @@ def save_rgb_sample_map(
     return output_path
 
 
+def save_chroma_distribution(
+    sample: pd.DataFrame,
+    path: str | Path,
+    width: int = 760,
+    height: int = 420,
+    bins_count: int = 24,
+) -> Path:
+    """Guarda un histograma de chroma Lab per veure colors grisos vs saturats."""
+    required_columns = {"chroma"}
+    missing_columns = required_columns - set(sample.columns)
+    if missing_columns:
+        raise ValueError(f"Falten columnes per generar el grafic: {sorted(missing_columns)}")
+
+    output_path = Path(path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    values = sample["chroma"].astype(float).to_numpy()
+    max_chroma = max(1.0, float(np.ceil(values.max() / 10) * 10))
+    counts, edges = np.histogram(values, bins=np.linspace(0, max_chroma, bins_count + 1))
+    max_count = max(1, int(counts.max()))
+
+    margin_left = 64
+    margin_right = 28
+    margin_top = 64
+    margin_bottom = 70
+    plot_width = width - margin_left - margin_right
+    plot_height = height - margin_top - margin_bottom
+
+    canvas = Image.new("RGB", (width, height), "white")
+    draw = ImageDraw.Draw(canvas)
+
+    left = margin_left
+    top = margin_top
+    right = left + plot_width
+    bottom = top + plot_height
+
+    draw.text((left, 18), "Distribucio del chroma de la mostra", fill=(0, 0, 0))
+    draw.text((left, 38), "Chroma baix = mes grisos; chroma alt = colors mes saturats", fill=(70, 70, 70))
+    draw.rectangle([left, top, right, bottom], outline=(25, 25, 25), width=1)
+
+    bar_gap = 2
+    bar_width = plot_width / bins_count
+    for index, count in enumerate(counts):
+        x0 = left + index * bar_width + bar_gap
+        x1 = left + (index + 1) * bar_width - bar_gap
+        bar_height = (count / max_count) * plot_height
+        y0 = bottom - bar_height
+        intensity = int(90 + 130 * (index / max(1, bins_count - 1)))
+        fill = (intensity, 80, 190)
+        draw.rectangle([x0, y0, x1, bottom], fill=fill)
+
+    draw.text((left - 8, bottom + 8), "0", fill=(90, 90, 90))
+    draw.text((right - 34, bottom + 8), f"{max_chroma:.0f}", fill=(90, 90, 90))
+    draw.text((left + (plot_width // 2) - 28, bottom + 30), "chroma", fill=(0, 0, 0))
+    draw.text((left - 48, top - 8), str(max_count), fill=(90, 90, 90))
+    draw.text((left - 44, top + 18), "freq.", fill=(0, 0, 0))
+
+    canvas.save(output_path, format="PNG")
+    return output_path
+
+
 def generate_images_from_sample(
     sample: pd.DataFrame,
     output_dir: str | Path,
