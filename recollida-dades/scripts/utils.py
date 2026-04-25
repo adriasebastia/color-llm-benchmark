@@ -66,6 +66,20 @@ def delete_sample_outputs(
     return removed
 
 
+def delete_png_files(image_dir: str | Path) -> list[Path]:
+    """Esborra nomes els PNG d'una carpeta i conserva la carpeta."""
+    folder = Path(image_dir)
+    removed: list[Path] = []
+
+    if folder.exists():
+        for target in folder.glob("*.png"):
+            target.unlink()
+            removed.append(target)
+
+    folder.mkdir(parents=True, exist_ok=True)
+    return removed
+
+
 def rgb_to_hex(rgb: tuple[int, int, int]) -> str:
     return f"{rgb[0]:02X}{rgb[1]:02X}{rgb[2]:02X}"
 
