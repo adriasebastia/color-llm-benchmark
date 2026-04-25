@@ -122,6 +122,14 @@ def generate_near_color(rgb: tuple[int, int, int], distance: int = 30) -> tuple[
     return tuple(clamp(channel + random.randint(-distance, distance)) for channel in rgb)
 
 
+def generate_random_rgb() -> tuple[int, int, int]:
+    return (
+        random.randint(0, 255),
+        random.randint(0, 255),
+        random.randint(0, 255),
+    )
+
+
 def generate_image_array(
     target_rgb: tuple[int, int, int],
     size: int = 100,
@@ -132,17 +140,10 @@ def generate_image_array(
     near_pixels = int(0.2 * total_pixels)
     random_pixels = total_pixels - target_pixels - near_pixels
 
-    near_color = generate_near_color(target_rgb, distance=near_distance)
-    random_color = (
-        random.randint(0, 255),
-        random.randint(0, 255),
-        random.randint(0, 255),
-    )
-
     pixels = (
         [target_rgb] * target_pixels
-        + [near_color] * near_pixels
-        + [random_color] * random_pixels
+        + [generate_near_color(target_rgb, distance=near_distance) for _ in range(near_pixels)]
+        + [generate_random_rgb() for _ in range(random_pixels)]
     )
     random.shuffle(pixels)
     return np.array(pixels, dtype=np.uint8).reshape((size, size, 3))
