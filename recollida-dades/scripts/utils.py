@@ -600,6 +600,41 @@ def generate_images_from_sample(
     return paths
 
 
+def generate_solid_images_from_sample(
+    sample: pd.DataFrame,
+    output_dir: str | Path,
+    size: int = 100,
+    progress: bool = False,
+    log_file: str | Path | None = None,
+) -> list[Path]:
+    """Genera imatges 100% del color objectiu, sense pixels propers ni aleatoris."""
+    image_dir = Path(output_dir)
+    image_dir.mkdir(parents=True, exist_ok=True)
+
+    paths: list[Path] = []
+    progress_bar = ProgressBar(len(sample), "Imatges sense soroll") if progress else None
+    started = time.time()
+
+    for index, row in enumerate(sample.itertuples(index=False), start=1):
+        target_rgb = (int(row.r), int(row.g), int(row.b))
+        image_array = np.full((size, size, 3), target_rgb, dtype=np.uint8)
+        paths.append(save_color_image(image_array, image_dir / row.image_name))
+
+        if progress_bar:
+            progress_bar.update(index, extra=row.image_name)
+
+    if progress_bar:
+        progress_bar.finish(extra="fet")
+
+    if log_file:
+        write_log(
+            f"Imatges sense soroll generades: files={len(paths)} temps={format_duration(time.time() - started)}",
+            log_file,
+        )
+
+    return paths
+
+
 def save_csv(data: pd.DataFrame, path: str | Path) -> Path:
     output_path = Path(path)
     output_path.parent.mkdir(parents=True, exist_ok=True)

@@ -52,6 +52,15 @@ temp/
 !/recollida-dades/tmp/
 /recollida-dades/tmp/*
 !/recollida-dades/tmp/.gitkeep
+/recollida-dades/sense-soroll/csv/*.csv
+!/recollida-dades/sense-soroll/csv/.gitkeep
+/recollida-dades/sense-soroll/images/*.png
+!/recollida-dades/sense-soroll/images/.gitkeep
+/recollida-dades/sense-soroll/logs/*.log
+!/recollida-dades/sense-soroll/logs/.gitkeep
+!/recollida-dades/sense-soroll/tmp/
+/recollida-dades/sense-soroll/tmp/*
+!/recollida-dades/sense-soroll/tmp/.gitkeep
 
 # Large local datasets and model/cache files
 data/raw/
