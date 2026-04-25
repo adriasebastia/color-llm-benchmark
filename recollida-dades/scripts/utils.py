@@ -21,6 +21,8 @@ PROMPT_FIX = (
     "code (RRGGBB)."
 )
 
+SRGB_MAX_LAB_CHROMA = 133.8041534423828
+
 
 def write_log(message: str, log_file: str | Path = Path("logs") / "pipeline.log") -> str:
     log_path = Path(log_file)
@@ -142,12 +144,17 @@ def hex_to_rgb(hex_color: str) -> tuple[int, int, int]:
     return int(clean[0:2], 16), int(clean[2:4], 16), int(clean[4:6], 16)
 
 
-def hex_to_chroma(hex_color: str) -> float:
+def hex_to_lab_chroma(hex_color: str) -> float:
     r, g, b = hex_to_rgb(hex_color)
     rgb = np.array([[[r / 255, g / 255, b / 255]]])
     lab = color.rgb2lab(rgb)
     _, a, b_val = lab[0][0]
     return float((a**2 + b_val**2) ** 0.5)
+
+
+def hex_to_chroma(hex_color: str) -> float:
+    """Retorna el chroma Lab normalitzat entre 0 i 1 dins l'espai sRGB."""
+    return min(1.0, hex_to_lab_chroma(hex_color) / SRGB_MAX_LAB_CHROMA)
 
 
 def generate_unique_colors(
@@ -417,7 +424,7 @@ def save_chroma_distribution(
     height: int = 420,
     bins_count: int = 24,
 ) -> Path:
-    """Guarda un histograma de chroma Lab per veure colors grisos vs saturats."""
+    """Guarda un histograma de chroma Lab normalitzat per veure grisos vs saturats."""
     required_columns = {"chroma"}
     missing_columns = required_columns - set(sample.columns)
     if missing_columns:
@@ -427,7 +434,7 @@ def save_chroma_distribution(
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     values = sample["chroma"].astype(float).to_numpy()
-    max_chroma = max(1.0, float(np.ceil(values.max() / 10) * 10))
+    max_chroma = 1.0
     counts, edges = np.histogram(values, bins=np.linspace(0, max_chroma, bins_count + 1))
     max_count = max(1, int(counts.max()))
 
@@ -446,8 +453,8 @@ def save_chroma_distribution(
     right = left + plot_width
     bottom = top + plot_height
 
-    draw.text((left, 18), "Distribucio del chroma de la mostra", fill=(0, 0, 0))
-    draw.text((left, 38), "Chroma baix = mes grisos; chroma alt = colors mes saturats", fill=(70, 70, 70))
+    draw.text((left, 18), "Distribucio del chroma normalitzat de la mostra", fill=(0, 0, 0))
+    draw.text((left, 38), "0 = mes grisos; 1 = maxim chroma possible en sRGB", fill=(70, 70, 70))
     draw.rectangle([left, top, right, bottom], outline=(25, 25, 25), width=1)
 
     bar_gap = 2
@@ -462,7 +469,7 @@ def save_chroma_distribution(
         draw.rectangle([x0, y0, x1, bottom], fill=fill)
 
     draw.text((left - 8, bottom + 8), "0", fill=(90, 90, 90))
-    draw.text((right - 34, bottom + 8), f"{max_chroma:.0f}", fill=(90, 90, 90))
+    draw.text((right - 18, bottom + 8), "1", fill=(90, 90, 90))
     draw.text((left + (plot_width // 2) - 28, bottom + 30), "chroma", fill=(0, 0, 0))
     draw.text((left - 48, top - 8), str(max_count), fill=(90, 90, 90))
     draw.text((left - 44, top + 18), "freq.", fill=(0, 0, 0))
@@ -791,6 +798,10 @@ def build_final_sample(
     model_outputs: pd.DataFrame,
     images_dir: str | Path | None = None,
 ) -> pd.DataFrame:
+    input_sample = input_sample.copy()
+    if "hex" in input_sample.columns:
+        input_sample["chroma"] = input_sample["hex"].apply(hex_to_chroma)
+
     final = input_sample.merge(model_outputs, on="image_name", how="left")
 
     if images_dir is not None:

@@ -164,7 +164,7 @@ recollida-dades/csv/input_image_sample.csv
 recollida-dades/images/*.png
 ```
 
-El CSV contiene los 1000 colores aleatorios, los canales `r`, `g`, `b`, el hexadecimal y el chroma. Las imagenes son PNG de 100x100 pixels con un 60% del color objetivo, 20% de un color cercano y 20% de un color aleatorio.
+El CSV contiene los 1000 colores aleatorios, los canales `r`, `g`, `b`, el hexadecimal y el `chroma`. El `chroma` se calcula en CIELAB como `sqrt(a^2 + b^2)` y se normaliza entre 0 y 1 dividiendo por el maximo posible dentro de sRGB. Las imagenes son PNG de 100x100 pixels con un 60% del color objetivo, 20% de un color cercano y 20% de un color aleatorio.
 
 2. Ejecutar despues:
 
