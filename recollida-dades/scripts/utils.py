@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import colorsys
 import random
 import re
 import time
@@ -29,6 +30,39 @@ def write_log(message: str, log_file: str | Path = Path("logs") / "pipeline.log"
         file.write(line + "\n")
 
     return line
+
+
+def delete_sample_outputs(
+    csv_dir: str | Path,
+    images_dir: str | Path,
+    logs_dir: str | Path,
+) -> list[Path]:
+    """Esborra els fitxers generats de la mostra, pero conserva les carpetes."""
+    removed: list[Path] = []
+    csv_path = Path(csv_dir)
+    image_path = Path(images_dir)
+    log_path = Path(logs_dir)
+
+    for pattern in ["input_image_sample.csv", "outputmodel_image_sample.csv", "sample-colors.csv"]:
+        target = csv_path / pattern
+        if target.exists():
+            target.unlink()
+            removed.append(target)
+
+    if image_path.exists():
+        for target in image_path.glob("*.png"):
+            target.unlink()
+            removed.append(target)
+
+    if log_path.exists():
+        for target in log_path.glob("*.log"):
+            target.unlink()
+            removed.append(target)
+
+    for folder in [csv_path, image_path, log_path]:
+        folder.mkdir(parents=True, exist_ok=True)
+
+    return removed
 
 
 def rgb_to_hex(rgb: tuple[int, int, int]) -> str:
@@ -117,6 +151,42 @@ def save_color_image(image_array: np.ndarray, path: str | Path) -> Path:
     output_path = Path(path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     Image.fromarray(image_array).save(output_path, format="PNG")
+    return output_path
+
+
+def save_rgb_sample_map(
+    sample: pd.DataFrame,
+    path: str | Path,
+    columns: int = 40,
+    swatch_size: int = 18,
+) -> Path:
+    """Guarda un mapa visual amb tots els colors RGB de la mostra."""
+    required_columns = {"r", "g", "b"}
+    missing_columns = required_columns - set(sample.columns)
+    if missing_columns:
+        raise ValueError(f"Falten columnes per generar el mapa: {sorted(missing_columns)}")
+
+    output_path = Path(path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    colors = []
+    for row in sample.itertuples(index=False):
+        rgb = (int(row.r), int(row.g), int(row.b))
+        hsv = colorsys.rgb_to_hsv(rgb[0] / 255, rgb[1] / 255, rgb[2] / 255)
+        colors.append((hsv, rgb))
+
+    colors.sort(key=lambda item: (item[0][0], item[0][1], item[0][2]))
+
+    rows = int(np.ceil(len(colors) / columns))
+    canvas = Image.new("RGB", (columns * swatch_size, rows * swatch_size), "white")
+
+    for index, (_, rgb) in enumerate(colors):
+        x = (index % columns) * swatch_size
+        y = (index // columns) * swatch_size
+        swatch = Image.new("RGB", (swatch_size, swatch_size), rgb)
+        canvas.paste(swatch, (x, y))
+
+    canvas.save(output_path, format="PNG")
     return output_path
 
 

@@ -42,6 +42,14 @@ tmp/
 temp/
 *.log
 
+# Generated benchmark samples
+/recollida-dades/csv/*.csv
+!/recollida-dades/csv/.gitkeep
+/recollida-dades/images/*.png
+!/recollida-dades/images/.gitkeep
+/recollida-dades/logs/*.log
+!/recollida-dades/logs/.gitkeep
+
 # Large local datasets and model/cache files
 data/raw/
 data/cache/
