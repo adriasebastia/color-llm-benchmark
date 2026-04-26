@@ -5,7 +5,7 @@ Esta carpeta contiene la generacion de imagenes, las respuestas de modelos y los
 ## Estructura
 
 - `scripts/`: funciones compartidas para generar imagenes, consultar modelos, calcular errores y guardar graficos.
-- `notebooks/`: notebooks de recogida de datos.
+- `notebooks/`: notebooks principales de recogida de datos; `notebooks/old/` conserva versiones anteriores.
 - `experiments/soroll/`: experimento con imagenes con ruido.
 - `experiments/sense-soroll/`: experimento con colores solidos sin ruido.
 - `archive/`: temporales antiguos, checkpoints de Jupyter y salidas auxiliares que no son resultados finales.
@@ -56,6 +56,6 @@ Sin ruido:
 
 ## Notebooks
 
-- `notebooks/dades.ipynb`: experimento original con ruido y modelos 4o.
-- `notebooks/dades-sensesoroll.ipynb`: experimento con colores solidos y modelos 4o.
-- `notebooks/dades-gpt5-rgb-pilot.ipynb`: ejecuciones GPT-5 con prompt RGB JSON sobre imagenes con ruido.
+- `notebooks/con-ruido.ipynb`: experimento con imagenes con ruido.
+- `notebooks/sin-ruido.ipynb`: experimento con colores solidos sin ruido.
+- `notebooks/old/`: versiones anteriores y pilotos, incluido el notebook GPT-5 RGB JSON.
