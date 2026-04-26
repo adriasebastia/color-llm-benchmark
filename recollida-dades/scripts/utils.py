@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import colorsys
+import json
 import random
 import re
 import time
@@ -19,6 +20,15 @@ PROMPT_FIX = (
     "Identify the main color of this image, understanding main as the one "
     "that takes up the most space in the image. Return only a hexadecimal RGB "
     "code (RRGGBB)."
+)
+
+PROMPT_RGB_JSON = (
+    "Estimate the dominant RGB color of the image as precisely as possible.\n"
+    "Do not use a named color, web color, CSS color, or common palette approximation.\n"
+    "Return the closest numeric estimate of the dominant color, even if the values are not round numbers.\n"
+    "Return only valid JSON with exactly these integer fields from 0 to 255:\n"
+    '{"r": 148, "g": 42, "b": 8}\n'
+    "Do not include markdown, explanations, hexadecimal codes, or any extra text."
 )
 
 SRGB_MAX_LAB_CHROMA = 133.8041534423828
@@ -573,6 +583,216 @@ def save_error_distribution(
     return output_path
 
 
+def save_error_boxplot(
+    final_sample: pd.DataFrame,
+    path: str | Path,
+    width: int = 820,
+    height: int = 460,
+) -> Path:
+    """Guarda un boxplot simple de l'error cromatic per model."""
+    required_columns = {"model", "status", "error_cromatic"}
+    missing_columns = required_columns - set(final_sample.columns)
+    if missing_columns:
+        raise ValueError(f"Falten columnes per generar el boxplot: {sorted(missing_columns)}")
+
+    output_path = Path(path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    valid = final_sample[
+        (final_sample["status"] == "ok") & final_sample["error_cromatic"].notna()
+    ].copy()
+
+    canvas = Image.new("RGB", (width, height), "white")
+    draw = ImageDraw.Draw(canvas)
+    margin_left = 72
+    margin_right = 36
+    margin_top = 82
+    margin_bottom = 82
+    plot_width = width - margin_left - margin_right
+    plot_height = height - margin_top - margin_bottom
+    left = margin_left
+    top = margin_top
+    bottom = top + plot_height
+    right = left + plot_width
+
+    draw.text((left, 20), "Boxplot de l'error cromatic per model", fill=(0, 0, 0))
+    draw.text((left, 42), "Linia central = mediana; caixa = IQR; bigotis = valors no extrems", fill=(70, 70, 70))
+    draw.rectangle([left, top, right, bottom], outline=(25, 25, 25), width=1)
+
+    if valid.empty:
+        draw.text((left + 24, top + 32), "Encara no hi ha prediccions valides per dibuixar.", fill=(120, 0, 0))
+        canvas.save(output_path, format="PNG")
+        return output_path
+
+    max_error = max(1.0, float(np.ceil(valid["error_cromatic"].max() / 10) * 10))
+    models = sorted(valid["model"].dropna().unique())
+    palette = [(45, 105, 190), (220, 90, 45), (70, 160, 95), (155, 90, 185)]
+
+    def y_for(value: float) -> float:
+        return bottom - (value / max_error) * plot_height
+
+    draw.text((left - 8, bottom + 8), "0", fill=(90, 90, 90))
+    draw.text((left - 52, top - 8), f"{max_error:.0f}", fill=(90, 90, 90))
+    draw.text((left - 54, top + 18), "error", fill=(0, 0, 0))
+
+    spacing = plot_width / max(1, len(models))
+    box_width = min(90, spacing * 0.45)
+
+    for model_index, model in enumerate(models):
+        values = valid.loc[valid["model"] == model, "error_cromatic"].astype(float).to_numpy()
+        q1, median, q3 = np.quantile(values, [0.25, 0.5, 0.75])
+        iqr = q3 - q1
+        low = np.min(values[values >= q1 - 1.5 * iqr])
+        high = np.max(values[values <= q3 + 1.5 * iqr])
+        x = left + spacing * (model_index + 0.5)
+        fill = palette[model_index % len(palette)]
+
+        y_q1 = y_for(q1)
+        y_q3 = y_for(q3)
+        y_median = y_for(median)
+        y_low = y_for(low)
+        y_high = y_for(high)
+
+        draw.line([x, y_high, x, y_low], fill=(40, 40, 40), width=2)
+        draw.line([x - box_width / 4, y_high, x + box_width / 4, y_high], fill=(40, 40, 40), width=2)
+        draw.line([x - box_width / 4, y_low, x + box_width / 4, y_low], fill=(40, 40, 40), width=2)
+        draw.rectangle([x - box_width / 2, y_q3, x + box_width / 2, y_q1], outline=(40, 40, 40), fill=fill, width=2)
+        draw.line([x - box_width / 2, y_median, x + box_width / 2, y_median], fill=(255, 255, 255), width=3)
+        draw.text((x - 46, bottom + 18), str(model), fill=(0, 0, 0))
+
+    canvas.save(output_path, format="PNG")
+    return output_path
+
+
+def save_response_repetition_plot(
+    final_sample: pd.DataFrame,
+    path: str | Path,
+    top_n: int = 12,
+    width: int = 920,
+    height: int = 540,
+) -> Path:
+    """Guarda barres amb les respostes hex repetides mes frequents per model."""
+    required_columns = {"model", "status", "response_hex"}
+    missing_columns = required_columns - set(final_sample.columns)
+    if missing_columns:
+        raise ValueError(f"Falten columnes per generar el grafic: {sorted(missing_columns)}")
+
+    output_path = Path(path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    valid = final_sample[
+        (final_sample["status"] == "ok") & final_sample["response_hex"].notna()
+    ].copy()
+
+    canvas = Image.new("RGB", (width, height), "white")
+    draw = ImageDraw.Draw(canvas)
+    draw.text((48, 20), "Respostes RGB mes repetides", fill=(0, 0, 0))
+    draw.text((48, 42), "Si apareixen moltes repeticions, el model esta col·lapsant cap a una paleta discreta", fill=(70, 70, 70))
+
+    if valid.empty:
+        draw.text((72, 92), "Encara no hi ha prediccions valides per dibuixar.", fill=(120, 0, 0))
+        canvas.save(output_path, format="PNG")
+        return output_path
+
+    models = sorted(valid["model"].dropna().unique())
+    panel_width = (width - 96) / max(1, len(models))
+    panel_top = 88
+    panel_height = height - panel_top - 40
+    max_count = 1
+    model_counts: dict[str, pd.Series] = {}
+
+    for model in models:
+        counts = valid.loc[valid["model"] == model, "response_hex"].value_counts().head(top_n)
+        model_counts[str(model)] = counts
+        if len(counts) > 0:
+            max_count = max(max_count, int(counts.max()))
+
+    for model_index, model in enumerate(models):
+        counts = model_counts[str(model)]
+        x0 = 48 + model_index * panel_width
+        y0 = panel_top
+        draw.text((x0, y0 - 22), str(model), fill=(0, 0, 0))
+        bar_area_width = panel_width - 120
+        row_height = panel_height / max(1, top_n)
+
+        for row_index, (hex_color, count) in enumerate(counts.items()):
+            y = y0 + row_index * row_height
+            try:
+                fill = hex_to_rgb(str(hex_color))
+            except ValueError:
+                fill = (120, 120, 120)
+            bar_width = (count / max_count) * bar_area_width
+            draw.rectangle([x0 + 74, y + 3, x0 + 74 + bar_width, y + row_height - 4], fill=fill, outline=(40, 40, 40))
+            draw.text((x0, y + 4), str(hex_color), fill=(0, 0, 0))
+            draw.text((x0 + 80 + bar_width, y + 4), str(int(count)), fill=(0, 0, 0))
+
+    canvas.save(output_path, format="PNG")
+    return output_path
+
+
+def save_error_vs_chroma_plot(
+    final_sample: pd.DataFrame,
+    path: str | Path,
+    width: int = 820,
+    height: int = 460,
+) -> Path:
+    """Guarda un scatter plot d'error cromatic contra chroma per model."""
+    required_columns = {"model", "status", "error_cromatic", "chroma"}
+    missing_columns = required_columns - set(final_sample.columns)
+    if missing_columns:
+        raise ValueError(f"Falten columnes per generar el grafic: {sorted(missing_columns)}")
+
+    output_path = Path(path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    valid = final_sample[
+        (final_sample["status"] == "ok") & final_sample["error_cromatic"].notna() & final_sample["chroma"].notna()
+    ].copy()
+
+    canvas = Image.new("RGB", (width, height), "white")
+    draw = ImageDraw.Draw(canvas)
+    margin_left = 72
+    margin_right = 36
+    margin_top = 82
+    margin_bottom = 78
+    plot_width = width - margin_left - margin_right
+    plot_height = height - margin_top - margin_bottom
+    left = margin_left
+    top = margin_top
+    right = left + plot_width
+    bottom = top + plot_height
+
+    draw.text((left, 20), "Error cromatic vs chroma", fill=(0, 0, 0))
+    draw.text((left, 42), "Cada punt es una imatge del pilot", fill=(70, 70, 70))
+    draw.rectangle([left, top, right, bottom], outline=(25, 25, 25), width=1)
+
+    if valid.empty:
+        draw.text((left + 24, top + 32), "Encara no hi ha prediccions valides per dibuixar.", fill=(120, 0, 0))
+        canvas.save(output_path, format="PNG")
+        return output_path
+
+    max_error = max(1.0, float(np.ceil(valid["error_cromatic"].max() / 10) * 10))
+    palette = [(45, 105, 190), (220, 90, 45), (70, 160, 95), (155, 90, 185)]
+
+    draw.text((left - 8, bottom + 8), "0", fill=(90, 90, 90))
+    draw.text((right - 20, bottom + 8), "1", fill=(90, 90, 90))
+    draw.text((left + (plot_width // 2) - 26, bottom + 32), "chroma", fill=(0, 0, 0))
+    draw.text((left - 52, top - 8), f"{max_error:.0f}", fill=(90, 90, 90))
+    draw.text((left - 54, top + 18), "error", fill=(0, 0, 0))
+
+    for model_index, model in enumerate(sorted(valid["model"].dropna().unique())):
+        sub = valid[valid["model"] == model]
+        fill = palette[model_index % len(palette)]
+        for row in sub.itertuples(index=False):
+            x = left + float(row.chroma) * plot_width
+            y = bottom - (float(row.error_cromatic) / max_error) * plot_height
+            draw.ellipse([x - 3, y - 3, x + 3, y + 3], fill=fill)
+        legend_x = left + model_index * 160
+        legend_y = height - 28
+        draw.rectangle([legend_x, legend_y, legend_x + 14, legend_y + 14], fill=fill)
+        draw.text((legend_x + 20, legend_y - 1), str(model), fill=(0, 0, 0))
+
+    canvas.save(output_path, format="PNG")
+    return output_path
+
+
 def generate_images_from_sample(
     sample: pd.DataFrame,
     output_dir: str | Path,
@@ -659,6 +879,39 @@ def normalise_hex_response(value: str) -> str | None:
     return match.group(1).upper() if match else None
 
 
+def normalise_rgb_json_response(value: str) -> str | None:
+    """Extreu RGB JSON i el retorna com hexadecimal RRGGBB."""
+    text = str(value or "").strip()
+    if text.startswith("```"):
+        text = re.sub(r"^```(?:json)?", "", text, flags=re.IGNORECASE).strip()
+        text = re.sub(r"```$", "", text).strip()
+
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError:
+        match = re.search(r"\{.*\}", text, flags=re.DOTALL)
+        if match is None:
+            return None
+        try:
+            payload = json.loads(match.group(0))
+        except json.JSONDecodeError:
+            return None
+
+    channels: list[int] = []
+    for key in ["r", "g", "b"]:
+        if key not in payload:
+            return None
+        try:
+            value_int = int(round(float(payload[key])))
+        except (TypeError, ValueError):
+            return None
+        if value_int < 0 or value_int > 255:
+            return None
+        channels.append(value_int)
+
+    return rgb_to_hex(tuple(channels))
+
+
 def compact_error_message(value: str, max_length: int = 180) -> str:
     """Redueix errors llargs a una sola linia perque el log sigui llegible."""
     message = " ".join(str(value or "").split())
@@ -667,34 +920,111 @@ def compact_error_message(value: str, max_length: int = 180) -> str:
     return f"{message[: max_length - 3]}..."
 
 
-def query_model_for_color(client, image_path: str | Path, model: str, temperature: float = 0.2) -> str:
+def query_model_for_color(
+    client,
+    image_path: str | Path,
+    model: str,
+    temperature: float | None = 0.2,
+    prompt: str = PROMPT_FIX,
+    max_output_tokens: int = 16,
+    reasoning_effort: str | None = None,
+) -> str:
     image = encode_image_base64(image_path)
-    response = client.responses.create(
-        model=model,
-        temperature=temperature,
-        max_output_tokens=16,
-        input=[
+    request = {
+        "model": model,
+        "max_output_tokens": max_output_tokens,
+        "input": [
             {
                 "role": "user",
                 "content": [
-                    {"type": "input_text", "text": PROMPT_FIX},
+                    {"type": "input_text", "text": prompt},
                     {"type": "input_image", "image_url": f"data:image/png;base64,{image}"},
                 ],
             }
         ],
-    )
+    }
+    if temperature is not None:
+        request["temperature"] = temperature
+    if reasoning_effort is not None and str(model).startswith("gpt-5"):
+        request["reasoning"] = {"effort": reasoning_effort}
+
+    response = client.responses.create(**request)
     return response.output_text.strip()
+
+
+def select_pilot_image_paths(
+    sample: pd.DataFrame,
+    images_dir: str | Path,
+    n_images: int = 50,
+    seed: int = 23,
+    previous_results: pd.DataFrame | None = None,
+    hard_fraction: float = 0.4,
+) -> list[Path]:
+    """Selecciona una mostra pilot equilibrada per chroma i amb casos dificils si existeixen resultats previs."""
+    if n_images <= 0:
+        return []
+
+    required_columns = {"image_name", "chroma"}
+    missing_columns = required_columns - set(sample.columns)
+    if missing_columns:
+        raise ValueError(f"Falten columnes per seleccionar pilot: {sorted(missing_columns)}")
+
+    rng = np.random.default_rng(seed)
+    image_dir = Path(images_dir)
+    selected: list[str] = []
+
+    if previous_results is not None and {"image_name", "error_cromatic"}.issubset(previous_results.columns):
+        hard_n = min(n_images, max(0, int(round(n_images * hard_fraction))))
+        hard_images = (
+            previous_results.dropna(subset=["error_cromatic"])
+            .groupby("image_name", as_index=False)["error_cromatic"]
+            .max()
+            .sort_values("error_cromatic", ascending=False)
+            .head(hard_n)["image_name"]
+            .tolist()
+        )
+        selected.extend(hard_images)
+
+    remaining_n = n_images - len(dict.fromkeys(selected))
+    if remaining_n > 0:
+        base = sample[~sample["image_name"].isin(selected)].copy()
+        base["chroma_bin"] = pd.qcut(base["chroma"], q=min(4, len(base)), duplicates="drop")
+        bins = list(base.groupby("chroma_bin", observed=True))
+        per_bin = max(1, int(np.ceil(remaining_n / max(1, len(bins)))))
+        balanced: list[str] = []
+
+        for _, group in bins:
+            names = group["image_name"].to_numpy()
+            take = min(per_bin, len(names), remaining_n - len(balanced))
+            if take <= 0:
+                break
+            balanced.extend(rng.choice(names, size=take, replace=False).tolist())
+
+        if len(balanced) < remaining_n:
+            rest = base[~base["image_name"].isin(balanced)]["image_name"].to_numpy()
+            take = min(remaining_n - len(balanced), len(rest))
+            if take > 0:
+                balanced.extend(rng.choice(rest, size=take, replace=False).tolist())
+
+        selected.extend(balanced)
+
+    unique_selected = list(dict.fromkeys(selected))[:n_images]
+    return [image_dir / name for name in unique_selected if (image_dir / name).exists()]
 
 
 def collect_model_outputs(
     client,
     image_paths: list[Path],
     models: list[str],
-    temperature: float = 0.2,
+    temperature: float | None = 0.2,
     output_path: str | Path | None = None,
     log_file: str | Path | None = None,
     max_images: int | None = None,
     retry_failed: bool = True,
+    response_format: str = "hex",
+    prompt: str | None = None,
+    reasoning_effort: str | None = None,
+    max_output_tokens: int | None = None,
 ) -> pd.DataFrame:
     """Consulta models de visio i desa resultats de forma incremental."""
     rows: list[dict] = []
@@ -739,16 +1069,45 @@ def collect_model_outputs(
             status = "ok"
             error_message = ""
             try:
+                query_prompt = prompt or (PROMPT_RGB_JSON if response_format == "rgb_json" else PROMPT_FIX)
+                token_limit = max_output_tokens
+                if token_limit is None:
+                    token_limit = 1200 if response_format == "rgb_json" else 16
                 raw_response = query_model_for_color(
                     client,
                     image_path=image_path,
                     model=model,
                     temperature=temperature,
+                    prompt=query_prompt,
+                    max_output_tokens=token_limit,
+                    reasoning_effort=reasoning_effort,
                 )
-                response_hex = normalise_hex_response(raw_response)
+                if response_format == "rgb_json":
+                    response_hex = normalise_rgb_json_response(raw_response)
+                else:
+                    response_hex = normalise_hex_response(raw_response)
+                if response_hex is None and response_format == "rgb_json":
+                    retry_token_limit = max(token_limit * 2, 2400)
+                    if log_file:
+                        write_log(
+                            "Model retry per JSON incomplet "
+                            f"[{task_index}/{total_tasks}] {model} {image_path.name} "
+                            f"max_output_tokens={retry_token_limit}",
+                            log_file,
+                        )
+                    raw_response = query_model_for_color(
+                        client,
+                        image_path=image_path,
+                        model=model,
+                        temperature=temperature,
+                        prompt=query_prompt,
+                        max_output_tokens=retry_token_limit,
+                        reasoning_effort=reasoning_effort,
+                    )
+                    response_hex = normalise_rgb_json_response(raw_response)
                 if response_hex is None:
                     status = "invalid_hex"
-                    error_message = f"Resposta sense hexadecimal valid: {raw_response}"
+                    error_message = f"Resposta sense color valid: {raw_response}"
             except Exception as error:  # noqa: BLE001
                 status = "error"
                 error_message = str(error)

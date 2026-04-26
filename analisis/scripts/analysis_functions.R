@@ -99,10 +99,88 @@ descriptive_by_model <- function(data) {
       mean = mean(.data$error_cromatic),
       median = median(.data$error_cromatic),
       sd = sd(.data$error_cromatic),
+      q1 = stats::quantile(.data$error_cromatic, 0.25),
+      q3 = stats::quantile(.data$error_cromatic, 0.75),
+      iqr = stats::IQR(.data$error_cromatic),
       min = min(.data$error_cromatic),
       max = max(.data$error_cromatic),
       .groups = "drop"
     )
+}
+
+add_chroma_groups <- function(data, n_groups = 4) {
+  if (!"chroma" %in% names(data)) {
+    stop("add_chroma_groups espera una columna chroma.")
+  }
+
+  breaks <- stats::quantile(data$chroma, probs = seq(0, 1, length.out = n_groups + 1), na.rm = TRUE)
+  breaks <- unique(as.numeric(breaks))
+
+  if (length(breaks) < 3) {
+    stop("No hi ha prou valors diferents de chroma per crear grups.")
+  }
+
+  labels <- paste0("G", seq_len(length(breaks) - 1))
+
+  data |>
+    dplyr::mutate(
+      chroma_group = cut(
+        .data$chroma,
+        breaks = breaks,
+        include.lowest = TRUE,
+        labels = labels
+      )
+    )
+}
+
+summarise_chroma_groups <- function(data) {
+  if (!"chroma_group" %in% names(data)) {
+    stop("Cal crear chroma_group amb add_chroma_groups abans de resumir.")
+  }
+
+  data |>
+    dplyr::group_by(.data$chroma_group, .data$model) |>
+    dplyr::summarise(
+      n = dplyr::n(),
+      chroma_min = min(.data$chroma),
+      chroma_max = max(.data$chroma),
+      mean_error = mean(.data$error_cromatic),
+      median_error = median(.data$error_cromatic),
+      sd_error = sd(.data$error_cromatic),
+      iqr_error = stats::IQR(.data$error_cromatic),
+      .groups = "drop"
+    )
+}
+
+summarise_paired_chroma_groups <- function(paired_data) {
+  if (!"chroma_group" %in% names(paired_data)) {
+    stop("Cal crear chroma_group amb add_chroma_groups abans de resumir.")
+  }
+
+  paired_data |>
+    dplyr::group_by(.data$chroma_group) |>
+    dplyr::summarise(
+      n = dplyr::n(),
+      chroma_min = min(.data$chroma),
+      chroma_max = max(.data$chroma),
+      mean_gpt_4o = mean(.data$error_gpt_4o),
+      mean_gpt_4o_mini = mean(.data$error_gpt_4o_mini),
+      mean_D = mean(.data$D),
+      sd_D = sd(.data$D),
+      iqr_D = stats::IQR(.data$D),
+      .groups = "drop"
+    )
+}
+
+paired_ttest_by_chroma_group <- function(paired_data) {
+  if (!"chroma_group" %in% names(paired_data)) {
+    stop("Cal crear chroma_group amb add_chroma_groups abans de fer tests per grup.")
+  }
+
+  paired_data |>
+    dplyr::group_by(.data$chroma_group) |>
+    dplyr::group_modify(~ paired_ttest_summary(.x)) |>
+    dplyr::ungroup()
 }
 
 paired_ttest_summary <- function(paired_data) {
@@ -191,6 +269,29 @@ plot_difference_vs_chroma <- function(paired_data) {
     ggplot2::geom_smooth(method = "lm", se = TRUE, color = "#D55E00") +
     ggplot2::geom_hline(yintercept = 0, linetype = "dashed") +
     ggplot2::labs(x = "Chroma", y = "D = error gpt-4o-mini - error gpt-4o") +
+    ggplot2::theme_minimal()
+}
+
+plot_error_by_chroma_group <- function(data) {
+  if (!"chroma_group" %in% names(data)) {
+    stop("Cal crear chroma_group amb add_chroma_groups abans de graficar.")
+  }
+
+  ggplot2::ggplot(data, ggplot2::aes(x = .data$chroma_group, y = .data$error_cromatic, fill = .data$model)) +
+    ggplot2::geom_boxplot(alpha = 0.75, outlier_alpha = 0.25) +
+    ggplot2::labs(x = "Grup de chroma", y = "Error cromatic", fill = "Model") +
+    ggplot2::theme_minimal()
+}
+
+plot_difference_by_chroma_group <- function(paired_data) {
+  if (!"chroma_group" %in% names(paired_data)) {
+    stop("Cal crear chroma_group amb add_chroma_groups abans de graficar.")
+  }
+
+  ggplot2::ggplot(paired_data, ggplot2::aes(x = .data$chroma_group, y = .data$D)) +
+    ggplot2::geom_boxplot(fill = "#4C78A8", alpha = 0.75, outlier_alpha = 0.25) +
+    ggplot2::geom_hline(yintercept = 0, linetype = "dashed") +
+    ggplot2::labs(x = "Grup de chroma", y = "D = error gpt-4o-mini - error gpt-4o") +
     ggplot2::theme_minimal()
 }
 
