@@ -35,6 +35,8 @@ dist/
 # Benchmark outputs and generated data
 outputs/
 results/
+!recollida-dades/experiments/*/results/
+!recollida-dades/experiments/*/results/*.csv
 runs/
 reports/
 artifacts/
@@ -80,5 +82,6 @@ pnpm-debug.log*
 .DS_Store
 Thumbs.db
 Desktop.ini
+.~lock.*#
 .idea/
 .vscode/
